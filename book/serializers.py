@@ -1,27 +1,19 @@
 from rest_framework import serializers
+from .models import Book
 
-from book.models import Book
 
-
-class BookListCreateSerializer(serializers.ModelSerializer):
+class BookSerializer(serializers.ModelSerializer):
     class Meta:
         model = Book
         fields = "__all__"
 
+    def create(self, validated_data):
+        book = Book.objects.create(**validated_data)
+        return book
 
-class BookDetailSerializer(serializers.ModelSerializer):
-    borrowings = serializers.SlugRelatedField(
-        many=True, read_only=True, slug_field="id"
-    )
+    def update(self, instance, validated_data):
+        instance.title = validated_data.get('title', instance.title)
+        instance.author = validated_data.get('author', instance.author)
+        instance.save()
 
-    class Meta:
-        model = Book
-        fields = (
-            "id",
-            "title",
-            "author",
-            "cover",
-            "inventory",
-            "daily_fee",
-            "borrowings",
-        )
+        return instance
