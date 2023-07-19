@@ -1,145 +1,108 @@
-import os
+from datetime import date
 
-import stripe
-from django.shortcuts import get_object_or_404
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema, OpenApiParameter
-from rest_framework import mixins, viewsets, status
+from rest_framework import viewsets, mixins, status
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.response import Response
 
-from borrowings.models import Borrowing, Payment
-from borrowings.notification_service import send_telegram_message
-from borrowings.serializers import (
-    BorrowingSerializer,
-    BorrowingListSerializer,
+from borrowing.models import Borrowing
+from borrowing.serializers import (
+    BorrowingReadSerializer,
+    BorrowingCreateSerializer,
     BorrowingReturnSerializer,
-    PaymentSerializer,
 )
 
 
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-
-
+@extend_schema(tags=["Borrowings"])
 class BorrowingViewSet(
     mixins.ListModelMixin,
-    mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
+    mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
 ):
-    queryset = Borrowing.objects.select_related("books", "users")
-    serializer_class = BorrowingSerializer
-    permission_classes = [IsAuthenticated]
+    queryset = Borrowing.objects.select_related("book", "user")
+    serializer_class = BorrowingReadSerializer
+    permission_classes = (IsAuthenticated,)
 
-    def get_queryset(self):
-        queryset = self.queryset
-        is_active = self.request.query_params.get("is_active")
-        user_id = self.request.query_params.get("user_id")
+    def get_permissions(self):
+        permission_classes = self.permission_classes
 
-        if is_active:
-            if is_active.lower() == "true":
-                queryset = queryset.filter(actual_return_date=None)
-            else:
-                queryset = queryset.exclude(actual_return_date=None)
+        if self.action == "return_borrowing":
+            permission_classes = [IsAdminUser]
 
-        if self.request.user.is_staff:
-            if user_id:
-                queryset = queryset.filter(user__id=user_id)
-
-            return queryset
-
-        return queryset.filter(user=self.request.user)
-
-    def get_serializer_class(self):
-        if self.action in ["list", "retrieve"]:
-            return BorrowingListSerializer
-
-        if self.action == "book_return":
-            return BorrowingReturnSerializer
-
-        return BorrowingSerializer
-
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
-
-    @extend_schema(
-        parameters=[
-            OpenApiParameter(
-                name="is_active",
-                description="Filter by active borrowings",
-                required=False,
-                type=OpenApiTypes.BOOL,
-            ),
-            OpenApiParameter(
-                name="user_id",
-                description="Filter by users ID",
-                required=False,
-                type=OpenApiTypes.INT,
-            ),
-        ]
-    )
-    def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
-
-    @action(methods=["POST"], detail=True, url_path="return")
-    def book_return(self, request, pk=None):
-        """Return a borrowed books"""
-        borrowing = self.get_object()
-        serializer = self.get_serializer(instance=borrowing, data=request.data)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-
-        return Response(
-            {"success": "Your books was successfully returned"},
-            status=status.HTTP_200_OK,
-        )
-
-
-class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Payment.objects.all()
-    serializer_class = PaymentSerializer
-    permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
 
     def get_queryset(self):
         queryset = self.queryset
 
         if not self.request.user.is_staff:
-            return queryset.filter(borrowing__user=self.request.user)
+            return queryset.filter(user=self.request.user)
 
-        return queryset
+        user_id = self.request.query_params.get("user_id")
+        is_active = self.request.query_params.get("is_active")
 
-    @action(detail=True, methods=["GET"], url_path="success")
-    def payment_success(self, request, pk=None):
-        """Handle a successful payment"""
-        payment = get_object_or_404(Payment, pk=pk)
+        if user_id:
+            queryset = queryset.filter(user_id=user_id)
 
-        session = stripe.checkout.Session.retrieve(payment.session_id)
-        if session.payment_status == "paid":
-            payment.status = Payment.StatusChoices.PAID
-            payment.save()
+        if is_active:
+            queryset = queryset.filter(actual_return_date=None)
 
-            message = (
-                f"Payment #{payment.id} was successful.\n"
-                f"Type: {payment.type}\n"
-                f"Borrowing: {payment.borrowing}"
-            )
-            send_telegram_message(message)
+        return queryset.distinct()
 
+    def get_serializer_class(self):
+        if self.action in ["list", "retrieve"]:
+            return BorrowingReadSerializer
+
+        if self.action == "create":
+            return BorrowingCreateSerializer
+
+        if self.action == "return_borrowing":
+            return BorrowingReturnSerializer
+
+        return BorrowingReadSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    @action(
+        methods=["POST"],
+        detail=True,
+        url_path="return",
+    )
+    def return_borrowing(self, request, pk=None):
+        borrowing = self.get_object()
+
+        if borrowing.actual_return_date is not None:
             return Response(
-                {"success": "Payment was successful."},
-                status=status.HTTP_200_OK,
-            )
-        else:
-            return Response(
-                {"error": "Payment was not successful."},
+                {"detail": "Borrowing has already been returned."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-    @action(detail=True, methods=["GET"], url_path="cancel")
-    def payment_cancel(self, request, pk=None):
-        """Handle a canceled payment"""
-        return Response(
-            {"message": "Payment can be made later."},
-            status=status.HTTP_200_OK,
-        )
+        borrowing.actual_return_date = date.today()
+        borrowing.save()
+
+        borrowing.book.inventory += 1
+        borrowing.book.save()
+
+        serializer = BorrowingReturnSerializer(borrowing)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "user_id",
+                type=OpenApiTypes.INT,
+                description="Filter by user id (ex. ?user_id=2)",
+            ),
+            OpenApiParameter(
+                "is_active",
+                type=OpenApiTypes.STR,
+                description="Filter is borrowing active or not (ex. ?is_active=true)",
+            ),
+        ]
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
