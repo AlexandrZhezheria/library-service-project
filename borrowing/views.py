@@ -28,7 +28,7 @@ class BorrowingViewSet(
     mixins.CreateModelMixin,
     viewsets.GenericViewSet,
 ):
-    queryset = Borrowing.objects.select_related("book", "user")
+    queryset = Borrowing.objects.select_related("books", "users")
     serializer_class = BorrowingSerializer
     permission_classes = [IsAuthenticated]
 
@@ -73,7 +73,7 @@ class BorrowingViewSet(
             ),
             OpenApiParameter(
                 name="user_id",
-                description="Filter by user ID",
+                description="Filter by users ID",
                 required=False,
                 type=OpenApiTypes.INT,
             ),
@@ -84,14 +84,14 @@ class BorrowingViewSet(
 
     @action(methods=["POST"], detail=True, url_path="return")
     def book_return(self, request, pk=None):
-        """Return a borrowed book"""
+        """Return a borrowed books"""
         borrowing = self.get_object()
         serializer = self.get_serializer(instance=borrowing, data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
         return Response(
-            {"success": "Your book was successfully returned"},
+            {"success": "Your books was successfully returned"},
             status=status.HTTP_200_OK,
         )
 

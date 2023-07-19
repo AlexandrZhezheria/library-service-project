@@ -32,11 +32,11 @@ class BorrowingSerializer(serializers.ModelSerializer):
             "borrow_date",
             "expected_return_date",
             "actual_return_date",
-            "book",
-            "user",
+            "books",
+            "users",
             "payments",
         )
-        read_only_fields = ("id", "borrow_date", "actual_return_date", "user")
+        read_only_fields = ("id", "borrow_date", "actual_return_date", "users")
 
     def validate(self, attrs):
         user = self.context["request"].user
@@ -45,7 +45,7 @@ class BorrowingSerializer(serializers.ModelSerializer):
             borrowing__user=user, status=Payment.StatusChoices.PENDING
         ).exists():
             raise serializers.ValidationError(
-                "You have pending payments. Cannot borrow a new book."
+                "You have pending payments. Cannot borrow a new books."
             )
 
         return attrs
@@ -59,7 +59,7 @@ class BorrowingSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        book = validated_data["book"]
+        book = validated_data["books"]
         user = self.context["request"].user
 
         borrowing = Borrowing.objects.create(
@@ -83,7 +83,7 @@ class BorrowingSerializer(serializers.ModelSerializer):
 
 class BorrowingListSerializer(BorrowingSerializer):
     book = BookSerializer(read_only=True)
-    user = serializers.ReadOnlyField(source="user.email")
+    user = serializers.ReadOnlyField(source="users.email")
 
 
 class BorrowingReturnSerializer(BorrowingSerializer):

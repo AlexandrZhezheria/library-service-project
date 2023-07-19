@@ -1,21 +1,21 @@
 from django.db import models
+from django.core.validators import MinValueValidator
 
 
 class Book(models.Model):
-    HARD = "H"
-    SOFT = "S"
     COVER_CHOICES = [
-        (HARD, "Hardcover"),
-        (SOFT, "Softcover"),
+        ("HARD", "Hardcover"),
+        ("SOFT", "Softcover"),
     ]
 
     title = models.CharField(max_length=255)
     author = models.CharField(max_length=255)
-    cover = models.CharField(max_length=1, choices=COVER_CHOICES)
+    cover = models.CharField(max_length=4, choices=COVER_CHOICES)
     inventory = models.PositiveIntegerField()
     daily_fee = models.DecimalField(
-        max_digits=8,
+        max_digits=6,
         decimal_places=2,
+        validators=[MinValueValidator(0.00)],
     )
 
     def __str__(self):

@@ -21,15 +21,15 @@ class Borrowing(models.Model):
     @property
     def total_price(self):
         return (
-            self.book.dayle_fee
-            * (self.expected_return_date - self.borrow_date).days
+                self.book.dayle_fee
+                * (self.expected_return_date - self.borrow_date).days
         )
 
     @property
     def fine_price(self):
         return (
-            self.book.dayle_fee
-            * (self.actual_return_date - self.expected_return_date).days
+                self.book.dayle_fee
+                * (self.actual_return_date - self.expected_return_date).days
         ) * 2
 
 
