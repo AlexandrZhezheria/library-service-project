@@ -1,3 +1,5 @@
+from datetime import date
+
 from django.db import transaction
 from rest_framework import serializers
 
@@ -49,3 +51,23 @@ class BorrowingReturnSerializer(serializers.ModelSerializer):
     class Meta:
         model = Borrowing
         fields = ("id", "actual_return_date")
+
+    def validate(self, data):
+        borrowing = self.instance
+
+        if borrowing.actual_return_date is not None:
+            raise serializers.ValidationError("Книга уже была возвращена.")
+
+        return data
+
+    def create(self, validated_data):
+        borrowing = self.instance
+        borrowing.actual_return_date = validated_data.get("actual_return_date", date.today())
+        borrowing.save()
+
+        with transaction.atomic():
+            book = borrowing.book
+            book.inventory += 1
+            book.save()
+
+        return borrowing
