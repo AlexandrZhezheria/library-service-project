@@ -1,11 +1,5 @@
-from datetime import date
-
-from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import extend_schema, OpenApiParameter
-from rest_framework import viewsets, mixins, status
-from rest_framework.decorators import action
+from rest_framework import viewsets, mixins
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
-from rest_framework.response import Response
 
 from borrowing.models import Borrowing
 from borrowing.serializers import (
@@ -15,7 +9,6 @@ from borrowing.serializers import (
 )
 
 
-@extend_schema(tags=["Borrowings"])
 class BorrowingViewSet(
     mixins.ListModelMixin,
     mixins.CreateModelMixin,
@@ -23,19 +16,18 @@ class BorrowingViewSet(
     viewsets.GenericViewSet,
 ):
     queryset = Borrowing.objects.select_related("book", "user")
-    serializer_class = BorrowingReadSerializer
     permission_classes = (IsAuthenticated,)
 
     def get_permissions(self):
-        permission_classes = self.permission_classes
+        permission_classes = super().get_permissions()
 
         if self.action == "return_borrowing":
             permission_classes = [IsAdminUser]
 
-        return [permission() for permission in permission_classes]
+        return permission_classes
 
     def get_queryset(self):
-        queryset = self.queryset
+        queryset = super().get_queryset()
 
         if not self.request.user.is_staff:
             return queryset.filter(user=self.request.user)
@@ -54,55 +46,11 @@ class BorrowingViewSet(
     def get_serializer_class(self):
         if self.action in ["list", "retrieve"]:
             return BorrowingReadSerializer
-
-        if self.action == "create":
+        elif self.action == "create":
             return BorrowingCreateSerializer
-
-        if self.action == "return_borrowing":
+        elif self.action == "return_borrowing":
             return BorrowingReturnSerializer
-
         return BorrowingReadSerializer
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
-
-    @action(
-        methods=["POST"],
-        detail=True,
-        url_path="return",
-    )
-    def return_borrowing(self, request, pk=None):
-        borrowing = self.get_object()
-
-        if borrowing.actual_return_date is not None:
-            return Response(
-                {"detail": "Borrowing has already been returned."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        borrowing.actual_return_date = date.today()
-        borrowing.save()
-
-        borrowing.book.inventory += 1
-        borrowing.book.save()
-
-        serializer = BorrowingReturnSerializer(borrowing)
-
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
-    @extend_schema(
-        parameters=[
-            OpenApiParameter(
-                "user_id",
-                type=OpenApiTypes.INT,
-                description="Filter by user id (ex. ?user_id=2)",
-            ),
-            OpenApiParameter(
-                "is_active",
-                type=OpenApiTypes.STR,
-                description="Filter is borrowing active or not (ex. ?is_active=true)",
-            ),
-        ]
-    )
-    def list(self, request, *args, **kwargs):
-        return super().list(request, *args, **kwargs)
